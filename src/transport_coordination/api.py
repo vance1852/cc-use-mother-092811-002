@@ -9,8 +9,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .errors import DomainError, ValidationError
+from .hub_service import HubService
 from .service import DomainService
 from .storage import Database
+
+
+def _hub(service: DomainService) -> HubService:
+    return HubService(service.database, service.clock)
 
 
 def route(service: DomainService, method: str, path: str, body: dict[str, Any] | None,
@@ -48,6 +53,59 @@ def route(service: DomainService, method: str, path: str, body: dict[str, Any] |
             query = parse_qs(parsed.query)
             after = int(query.get("after_sequence", ["0"])[0])
             return 200, {"items": service.audit_events(after)}
+
+        hub = _hub(service)
+        query = parse_qs(parsed.query)
+
+        def q(name: str, default: str = "") -> str:
+            return query.get(name, [default])[0]
+
+        if method == "POST" and parsed.path == "/hub/resources":
+            result = hub.register_resource(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/contracts":
+            result = hub.register_contract(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/batches":
+            result = hub.register_batch(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/shipments":
+            result = hub.register_shipment(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/blockades":
+            result = hub.register_blockade(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/events":
+            result = hub.ingest_event(actor_id=actor_id, site_id=body.pop("site_id", ""),
+                                      event=body.pop("event", body),
+                                      request_id=body.pop("request_id", ""))
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/plans":
+            result = hub.create_plan(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/plans/confirm":
+            result = hub.confirm_plan(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 200, result
+        if method == "POST" and parsed.path == "/hub/plans/commit":
+            result = hub.commit_plan(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "POST" and parsed.path == "/hub/rate-freezes":
+            result = hub.freeze_rate(actor_id=actor_id, **body)
+            return 200 if result.get("replayed") else 201, result
+        if method == "GET" and parsed.path == "/hub/plans":
+            return 200, hub.get_plan(q("plan_id"))
+        if method == "GET" and parsed.path == "/hub/shipments":
+            return 200, {"items": hub.list_shipments(q("site_id"))}
+        if method == "GET" and parsed.path == "/hub/shipment":
+            return 200, hub.get_shipment(q("site_id"), q("shipment_id"))
+        if method == "GET" and parsed.path == "/hub/timeline":
+            return 200, {"items": hub.timeline(q("site_id"))}
+        if method == "GET" and parsed.path == "/hub/conservation":
+            return 200, hub.conservation(q("site_id"))
+        if method == "GET" and parsed.path == "/hub/rate":
+            return 200, hub.compute_rate(q("site_id"), q("as_of") or None)
+        if method == "GET" and parsed.path == "/hub/rate-freezes":
+            return 200, {"items": hub.list_freezes(q("site_id"))}
         return 404, {"error": "route_not_found", "message": "接口不存在"}
     except DomainError as exc:
         return exc.status, {"error": exc.code, "message": str(exc)}

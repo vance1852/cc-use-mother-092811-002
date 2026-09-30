@@ -63,6 +63,134 @@ CREATE TABLE IF NOT EXISTS audit_events (
     event_hash TEXT NOT NULL UNIQUE,
     occurred_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hub_resources (
+    site_id TEXT NOT NULL REFERENCES sites(site_id),
+    resource_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('crane', 'slot')),
+    name TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(site_id, resource_id)
+);
+CREATE TABLE IF NOT EXISTS hub_contracts (
+    site_id TEXT NOT NULL REFERENCES sites(site_id),
+    contract_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    priority_rank INTEGER NOT NULL CHECK(priority_rank >= 0),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(site_id, contract_id)
+);
+CREATE TABLE IF NOT EXISTS hub_batches (
+    site_id TEXT NOT NULL REFERENCES sites(site_id),
+    batch_id TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('rail', 'vessel', 'vehicle')),
+    planned_arrival TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(site_id, batch_id)
+);
+CREATE TABLE IF NOT EXISTS hub_shipments (
+    site_id TEXT NOT NULL REFERENCES sites(site_id),
+    shipment_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    contract_id TEXT,
+    inbound_party TEXT NOT NULL,
+    outbound_party TEXT NOT NULL,
+    duration_minutes INTEGER NOT NULL CHECK(duration_minutes > 0),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(site_id, shipment_id)
+);
+CREATE TABLE IF NOT EXISTS hub_containers (
+    site_id TEXT NOT NULL,
+    shipment_id TEXT NOT NULL,
+    container_id TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY(site_id, shipment_id, container_id)
+);
+CREATE TABLE IF NOT EXISTS hub_blockades (
+    site_id TEXT NOT NULL,
+    blockade_id TEXT NOT NULL PRIMARY KEY,
+    resource_id TEXT NOT NULL,
+    start_ts TEXT NOT NULL,
+    end_ts TEXT,
+    reason TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hub_events (
+    delivery_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    site_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    delivered_by TEXT NOT NULL,
+    delivered_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hub_plans (
+    site_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL PRIMARY KEY,
+    supersedes TEXT,
+    state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open','superseded','lapsed','committed')),
+    expires_at TEXT NOT NULL,
+    committed_at TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hub_plan_tasks (
+    plan_id TEXT NOT NULL,
+    task_index INTEGER NOT NULL,
+    shipment_id TEXT NOT NULL,
+    group_key TEXT NOT NULL,
+    container_ids_json TEXT NOT NULL,
+    ready_at TEXT NOT NULL,
+    start_ts TEXT NOT NULL,
+    end_ts TEXT NOT NULL,
+    crane_id TEXT NOT NULL,
+    slot_id TEXT NOT NULL,
+    PRIMARY KEY(plan_id, task_index)
+);
+CREATE TABLE IF NOT EXISTS hub_plan_confirms (
+    plan_id TEXT NOT NULL,
+    party TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    confirmed_at TEXT NOT NULL,
+    PRIMARY KEY(plan_id, party)
+);
+CREATE TABLE IF NOT EXISTS hub_plan_releases (
+    plan_id TEXT NOT NULL,
+    task_index INTEGER NOT NULL,
+    site_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    released_at TEXT NOT NULL,
+    PRIMARY KEY(plan_id, task_index)
+);
+CREATE TABLE IF NOT EXISTS hub_holds (
+    site_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    shipment_id TEXT NOT NULL,
+    group_key TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    start_ts TEXT NOT NULL,
+    end_ts TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hub_rate_freezes (
+    site_id TEXT NOT NULL,
+    freeze_id TEXT NOT NULL PRIMARY KEY,
+    as_of TEXT NOT NULL,
+    arrived_count INTEGER NOT NULL,
+    transferred_count INTEGER NOT NULL,
+    within_60m_count INTEGER NOT NULL,
+    rate REAL NOT NULL,
+    detail_json TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(site_id, as_of)
+);
 """
 
 

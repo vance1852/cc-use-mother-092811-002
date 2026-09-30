@@ -1,5 +1,7 @@
-"""技能赛训协作基础服务的服务端基础包。"""
+"""多式联运一小时换装协同服务包。"""
 
+from .clock import FixedClock, ManualClock, SystemClock
+from .hub_service import HubService
 from .service import DomainService
 
-__all__ = ["DomainService"]
+__all__ = ["DomainService", "HubService", "SystemClock", "FixedClock", "ManualClock"]

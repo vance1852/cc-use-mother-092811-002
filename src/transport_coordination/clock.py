@@ -34,3 +34,32 @@ class FixedClock:
         """返回固定的 UTC 时间。"""
 
         return self._value
+
+
+class ManualClock:
+    """供离线测试精确推进的可控时钟。"""
+
+    def __init__(self, value: datetime) -> None:
+        if value.tzinfo is None:
+            raise ValueError("初始时间必须包含时区")
+        self._value = value.astimezone(timezone.utc)
+
+    def now(self) -> datetime:
+        """返回当前被控制的时间。"""
+
+        return self._value
+
+    def advance(self, minutes: int = 0, seconds: int = 0) -> datetime:
+        """把时钟向前推进并返回新时间。"""
+
+        from datetime import timedelta
+
+        self._value = self._value + timedelta(minutes=minutes, seconds=seconds)
+        return self._value
+
+    def set(self, value: datetime) -> None:
+        """把时钟设置到指定时间。"""
+
+        if value.tzinfo is None:
+            raise ValueError("目标时间必须包含时区")
+        self._value = value.astimezone(timezone.utc)
