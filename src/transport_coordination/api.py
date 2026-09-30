@@ -9,12 +9,14 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .errors import DomainError, ValidationError
+from .hub import HubService
 from .service import DomainService
 from .storage import Database
 
 
 def route(service: DomainService, method: str, path: str, body: dict[str, Any] | None,
-          headers: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
+          headers: dict[str, str] | None = None,
+          hub: HubService | None = None) -> tuple[int, dict[str, Any]]:
     """把一个 HTTP 语义请求分派到领域服务。"""
 
     headers = headers or {}
@@ -48,6 +50,10 @@ def route(service: DomainService, method: str, path: str, body: dict[str, Any] |
             query = parse_qs(parsed.query)
             after = int(query.get("after_sequence", ["0"])[0])
             return 200, {"items": service.audit_events(after)}
+        if hub is not None:
+            status, payload = _route_hub(hub, method, parsed, body, actor_id)
+            if status is not None:
+                return status, payload
         return 404, {"error": "route_not_found", "message": "接口不存在"}
     except DomainError as exc:
         return exc.status, {"error": exc.code, "message": str(exc)}
@@ -55,10 +61,64 @@ def route(service: DomainService, method: str, path: str, body: dict[str, Any] |
         return 400, {"error": "invalid_request", "message": str(exc)}
 
 
+def _route_hub(hub: HubService, method: str, parsed, body: dict[str, Any],
+               actor_id: str) -> tuple[int | None, dict[str, Any]]:
+    """换装协同相关路由。返回 None 表示未命中。"""
+    path = parsed.path
+    query = parse_qs(parsed.query)
+    parts = [p for p in path.split("/") if p]
+    if method == "POST":
+        if path == "/hub/resources":
+            result = hub.register_resource(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+        if path == "/hub/blockades":
+            result = hub.register_blockade(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+        if path == "/hub/contracts":
+            result = hub.register_contract(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+        if path == "/shipments":
+            result = hub.register_shipment(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+        if path == "/batches":
+            result = hub.register_batch(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+        if path == "/events":
+            result = hub.ingest_event(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+        if path == "/plans":
+            result = hub.create_plan(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+        if path == "/plans/confirm":
+            result = hub.confirm_plan(actor_id=actor_id, **body)
+            confirmation_status = result.get("confirmation", {}).get("status")
+            code = 409 if confirmation_status in ("rejected", "expired") else 200
+            return code, result
+        if path == "/kpi-reports":
+            result = hub.freeze_kpi(actor_id=actor_id, **body)
+            return (200 if result.get("replayed") else 201), result
+    if method == "GET":
+        if path == "/timeline":
+            site_id = query.get("site_id", [""])[0]
+            return 200, hub.get_timeline(site_id)
+        if path == "/tasks":
+            site_id = query.get("site_id", [""])[0]
+            return 200, hub.list_tasks(site_id)
+        if path == "/kpi-reports":
+            site_id = query.get("site_id", [""])[0]
+            return 200, {"items": hub.list_kpi_reports(site_id)}
+        if len(parts) == 2 and parts[0] == "shipments":
+            return 200, hub.get_shipment_view(parts[1])
+        if len(parts) == 2 and parts[0] == "kpi-reports":
+            return 200, hub.get_kpi_report(parts[1])
+    return None, {}
+
+
 class Handler(BaseHTTPRequestHandler):
     """把标准库 HTTP 请求转换为路由调用。"""
 
     service: DomainService
+    hub: HubService
 
     def _handle(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
@@ -69,7 +129,8 @@ class Handler(BaseHTTPRequestHandler):
             self._write(400, {"error": "invalid_json", "message": "请求体必须是 UTF-8 JSON"})
             return
         status, payload = route(self.service, self.command, self.path, body,
-                                {"X-Actor-Id": self.headers.get("X-Actor-Id", "")})
+                                {"X-Actor-Id": self.headers.get("X-Actor-Id", "")},
+                                hub=self.hub)
         self._write(status, payload)
 
     def _write(self, status: int, payload: dict[str, Any]) -> None:
@@ -100,6 +161,7 @@ def main() -> int:
     args = parser.parse_args()
     database = Database(args.database)
     Handler.service = DomainService(database)
+    Handler.hub = HubService(database)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     try:
         server.serve_forever()
